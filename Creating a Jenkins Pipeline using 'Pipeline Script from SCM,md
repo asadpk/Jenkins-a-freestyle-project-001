@@ -1,0 +1,206 @@
+Jenkins Pipeline with SCM Integration
+📋 Overview
+This guide demonstrates creating a Jenkins pipeline using Pipeline Script from SCM (Source Control Management). The pipeline automates clone, build, and deploy steps while versioning the Jenkinsfile in Git for better maintainability and consistency.
+🎯 Prerequisites
+Jenkins server with Docker installed
+GitHub repository access
+Docker installed on Jenkins server
+Git client on local machine
+
+🔧 Step 1: Environment Cleanup
+Before starting, clean up any existing containers and images:
+bash
+# Stop and remove existing containers
+docker stop webapp_ctr 2>/dev/null || true
+docker rm webapp_ctr 2>/dev/null || true
+
+# Clean Docker system
+docker system prune -a -f --volumes
+
+# Verify cleanup
+docker ps -a
+docker images
+
+🖥️ Step 2: Jenkins IP Auto-Update Script
+Create a script to automatically update Jenkins URL with EC2's public IP:
+Create the script:
+bash
+sudo nano /usr/local/bin/update-jenkins-ip.sh
+Script Content:
+bash
+#!/bin/bash
+echo "$(date): Updating Jenkins IP..."
+
+# Get EC2 public IP using IMDSv2
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
+NEW_IP=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null)
+
+if [ -z "$NEW_IP" ]; then
+    echo "Error: Could not retrieve the IP address"
+    exit 1
+fi
+
+echo "New IP: $NEW_IP"
+
+# Update Jenkins configuration
+CONFIG_FILE="/var/lib/jenkins/jenkins.model.JenkinsLocationConfiguration.xml"
+
+if [ -f "$CONFIG_FILE" ]; then
+    sudo sed -i "s|<jenkinsUrl>http://[^:]*:8080/</jenkinsUrl>|<jenkinsUrl>http://$NEW_IP:8080/</jenkinsUrl>|" "$CONFIG_FILE"
+    sudo systemctl restart jenkins
+    echo "Jenkins updated to: http://$NEW_IP:8080/"
+else
+    echo "Configuration file not found. Please configure manually via the Jenkins interface."
+fi
+Set permissions and test:
+bash
+# Make executable
+sudo chmod +x /usr/local/bin/update-jenkins-ip.sh
+
+# Test the script
+sudo /usr/local/bin/update-jenkins-ip.sh
+Automate with systemd service:
+Create a service file:
+bash
+sudo nano /etc/systemd/system/jenkins-ip-update.service
+Service file content:
+ini
+[Unit]
+Description=Update Jenkins IP
+After=jenkins.service
+Wants=jenkins.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/update-jenkins-ip.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+Enable the service:
+bash
+sudo systemctl enable jenkins-ip-update.service
+sudo systemctl daemon-reload
+Verify IP update:
+bash
+# Get current EC2 public IP
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
+curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4
+
+# Check Jenkins configuration
+cat /var/lib/jenkins/jenkins.model.JenkinsLocationConfiguration.xml
+
+🔄 Step 3: Local Git Workflow
+Clone repository to local machine:
+bash
+git clone https://github.com/asadpk/Jenkins-Tasks.git
+cd Jenkins-Tasks
+Create Jenkinsfile in project root:
+File: Jenkinsfile
+groovy
+pipeline {
+    agent any
+
+    stages {
+        stage('Clonning Git Repository') {
+            steps {
+                git branch: 'main', url: 'https://github.com/asadpk/Jenkins-Tasks.git'
+            }
+        }
+        stage('Building Image') {
+            steps {
+                sh 'docker build -t webapp:${BUILD_NUMBER} .'
+            }
+        }
+        stage('Deploy Application') {
+            steps {
+                sh 'docker run --rm -d -p 3000:3000 --name webapp_ctr webapp:${BUILD_NUMBER}'
+            }
+        }
+    }
+}
+Commit and push to GitHub:
+bash
+# Add Jenkinsfile
+git add Jenkinsfile
+
+# Commit changes
+git commit -m "Add Jenkinsfile for pipeline configuration"
+
+# Push to GitHub
+git push origin main
+
+⚙️ Step 4: Jenkins Pipeline Configuration
+Create new pipeline in Jenkins:
+Jenkins Dashboard → New Item
+Enter item name: jk-pipeline-scm
+Select: Pipeline
+Click: OK
+Configure pipeline:
+Description: (Optional) Jenkins pipeline using SCM with GitHub
+Pipeline Section:
+Definition: Pipeline script from SCM
+SCM: Git
+Repository URL: https://github.com/asadpk/Jenkins-Tasks.git
+Branches to build: */main
+Script Path: Jenkinsfile
+Save
+
+🚀 Step 5: Run and Verify Pipeline
+Execute pipeline:
+Click: Build Now
+Monitor: Pipeline stages in Blue Ocean view
+Verify: Console output for success
+Access deployed application:
+text
+http://<jenkins-server-ip>:3000
+
+🐛 Troubleshooting
+Common Issues and Solutions:
+Git authentication errors:
+bash
+# Generate GitHub Personal Access Token
+# GitHub → Settings → Developer settings → Personal access tokens
+# Add token to Jenkins credentials
+Docker permission issues:
+bash
+# Add Jenkins user to docker group
+sudo usermod -aG docker jenkins
+sudo systemctl restart jenkins
+Port conflicts:
+bash
+# Check if port 3000 is in use
+sudo netstat -tulpn | grep :3000
+
+📁 Repository Structure
+text
+Jenkins-Tasks/
+├── Jenkinsfile           # Pipeline definition
+├── Dockerfile           # Application container definition
+├── src/                 # Application source code
+├── package.json        # Node.js dependencies
+└── README.md           # Documentation
+
+🔗 Useful Links
+Jenkins Pipeline Documentation
+Docker Documentation
+GitHub Actions
+
+📝 Notes
+Every EC2 restart: Jenkins IP will auto-update via systemd service
+Pipeline changes: Update Jenkinsfile in Git repository, Jenkins automatically uses latest version
+Security: Use GitHub tokens instead of passwords for authentication
+Backup: Jenkinsfile is versioned in Git, providing disaster recovery
+
+✅ Verification Checklist
+Jenkins IP auto-update script working
+Jenkinsfile committed to GitHub repository
+Pipeline configured in Jenkins with SCM
+Pipeline executes all three stages successfully
+Application accessible on port 3000
+Docker images built with proper tagging
+
+Maintainer: Asad
+Repository: https://github.com/asadpk/Jenkins-Tasks
+Last Updated: $(date +%Y-%m-%d)
+
