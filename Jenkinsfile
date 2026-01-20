@@ -4,7 +4,7 @@ pipeline {
     stages {
         stage('Clonning Git Repository') {
             steps {
-                git branch: 'main', url: 'https://github.com/asadpk/jk-public-gh.git'
+                git branch: 'main', url: 'https://github.com/asadpk/Jenkins-Tasks'
             }
         }
         stage('Building Image') {
